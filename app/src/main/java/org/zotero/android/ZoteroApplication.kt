@@ -1,121 +1,445 @@
-package org.zotero.android
+# Plugin system for Android Zotero
 
-import android.app.Application
-import android.content.Context
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.ProcessLifecycleOwner
-import com.google.gson.Gson
-import com.pspdfkit.PSPDFKit
-import dagger.hilt.android.HiltAndroidApp
-import org.zotero.android.BuildConfig.EVENT_AND_CRASH_LOGGING_ENABLED
-import org.zotero.android.androidx.content.longToast
-import org.zotero.android.api.annotations.ForGsonWithRoundedDecimals
-import org.zotero.android.architecture.Defaults
-import org.zotero.android.architecture.coroutines.ApplicationScope
-import org.zotero.android.architecture.crashreporting.FirebaseCrashReportingTree
-import org.zotero.android.architecture.logging.crash.CrashFileWriter
-import org.zotero.android.architecture.logging.debug.DebugLoggingTree
-import org.zotero.android.files.FileStore
-import org.zotero.android.sync.Controllers
-import timber.log.Timber
-import javax.inject.Inject
+This package introduces the foundation for a Zotero plugin architecture on Android.
 
-@HiltAndroidApp
-open class ZoteroApplication: Application(), DefaultLifecycleObserver {
+The initial use case is to support attachment storage providers similar to Zotmoov, where the app can define where the PDF files for Zotero documents are kept.
 
-    @Inject
-    lateinit var controllers: Controllers
+## Current implementation
 
-    @Inject
-    lateinit var applicationScope: ApplicationScope
+- `PluginType`: plugin categories
+- `PluginSettings`: settings bag for plugin configuration
+- `PluginManager`: registers and resolves plugins
+- `AttachmentStoragePlugin`: contract for storage providers
+- `LocalPdfStoragePlugin`: default local Android directory provider
+- `PluginRegistry`: bootstrap registration point
 
-    @Inject
-    lateinit var fileStore: FileStore
+## Why this design
 
-    @Inject
-    lateinit var debugLoggingTree: DebugLoggingTree
+The plugin API is intentionally narrow: it does not try to expose the entire Zotero app to arbitrary code. Instead, it focuses on a specific extension point: choosing where attachments (especially PDFs) are stored and retrieved from.
 
-    @Inject
-    lateinit var gson: Gson
+This makes the system safer and easier to evolve for future features such as SAF/Drive/OneDrive providers.
 
-    @Inject
-    lateinit var crashFileWriter: CrashFileWriter
+## Planned next steps
 
-    @Inject
-    lateinit var defaults: Defaults
+1. Add a UI for selecting a custom destination directory
+2. Support Android SAF so the user can choose a folder outside the app sandbox
+3. Persist plugin settings in the app database
+4. Add plugin lifecycle and installation management
+5. Extend the system to non-PDF document storage workflows
 
-    @Inject
-    @ForGsonWithRoundedDecimals
-    lateinit var gsonWithRoundedDecimals: Gson
+## Example
 
-    companion object {
-        lateinit var instance: ZoteroApplication
-    }
+```kotlin
+val pluginManager = PluginManager(context)
+PluginRegistry.registerDefaultPlugins(context, pluginManager)
 
-    override fun onCreate() {
-        super<Application>.onCreate()
-        instance = this
-        setUpLogging()
+val item = ZoteroItem(
+    id = "123",
+    title = "Paper title",
+    collectionName = "Research",
+    year = 2025,
+)
 
-        controllers.init()
+val attachment = AttachmentMetadata(
+    id = "456",
+    mimeType = "application/pdf",
+    title = "paper.pdf",
+)
 
-        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
-        initializePspdfKit()
-    }
+val plugin = pluginManager.resolveAttachmentStoragePlugin(item, attachment)
+val destination = plugin?.resolveDestination(
+    item,
+    attachment,
+    PluginSettings().apply { setString("baseDirectory", "/storage/emulated/0/Documents/Zotero") },
+)
+```
 
-    private fun initializePspdfKit() {
-        val initializationResult = attemptToInitializePspdfKit(this)
-        defaults.setPspdfkitInitialized(initializationResult)
 
-    }
 
-    private fun attemptToInitializePspdfKit(context: Context): Boolean {
-        try {
-            if (BuildConfig.PSPDFKIT_KEY.isNotBlank()) {
-                PSPDFKit.initialize(context, BuildConfig.PSPDFKIT_KEY)
-            } else {
-                PSPDFKit.initialize(context, null)
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Unable to initialize PSPDFKIT")
-            context.longToast("Unable to initialize PSPDFKIT")
-            return false
-        }
-        return true
-    }
 
-    override fun onStart(owner: LifecycleOwner) {
-        controllers.willEnterForeground()
-    }
 
-    override fun onStop(owner: LifecycleOwner) {
-        controllers.didEnterBackground()
-    }
 
-    override fun onDestroy(owner: LifecycleOwner) {
-        controllers.willTerminate()
-    }
 
-    private fun setUpLogging() {
-        val consoleDebugTree = object : Timber.DebugTree() {
-            override fun createStackElementTag(element: StackTraceElement): String {
-                return "[${Thread.currentThread().name}]" +
-                        "${super.createStackElementTag(element)}"
-            }
-        }
-        val listOfTrees = mutableListOf(consoleDebugTree, debugLoggingTree)
-        if (EVENT_AND_CRASH_LOGGING_ENABLED) {
-            val defaultExceptionHandler = Thread.getDefaultUncaughtExceptionHandler()
-            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-                crashFileWriter.writeCrashToFile(throwable.stackTraceToString())
-                defaultExceptionHandler?.uncaughtException(
-                    thread,
-                    throwable
-                )
-            }
-            listOfTrees.add(FirebaseCrashReportingTree())
-        }
-        Timber.plant(*listOfTrees.toTypedArray())
-    }
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
