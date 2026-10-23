@@ -1,98 +1,66 @@
 package org.zotero.android.plugins
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import java.io.File
+import java.util.LinkedHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
 
-enum class PluginType {
-    TRANSLATOR,
-    STYLE,
-    ATTACHMENT_STORAGE,
-    EXTENSION,
-}
-
-data class PluginSettings(
-    private val values: MutableMap<String, String> = linkedMapOf(),
+@Singleton
+class PluginManager @Inject constructor(
+    private val context: Context,
 ) {
-    fun setString(key: String, value: String) {
-        values[key] = value
+    private val attachmentStoragePlugins = LinkedHashMap<String, AttachmentStoragePlugin>()
+
+    init {
+        PluginRegistry.registerDefaultPlugins(context, this)
     }
 
-    fun getString(key: String, defaultValue: String? = null): String? {
-        return values[key] ?: defaultValue
+    fun register(plugin: AttachmentStoragePlugin) {
+        plugin.initialize(context)
+        attachmentStoragePlugins[plugin.id] = plugin
     }
 
-    fun setBoolean(key: String, value: Boolean) {
-        values[key] = value.toString()
+    fun unregister(pluginId: String) {
+        val plugin = attachmentStoragePlugins.remove(pluginId)
+        plugin?.shutdown()
     }
 
-    fun getBoolean(key: String, defaultValue: Boolean = false): Boolean {
-        return values[key]?.toBooleanStrictOrNull() ?: defaultValue
-    }
+    fun getAttachmentStoragePlugins(): List<AttachmentStoragePlugin> =
+        attachmentStoragePlugins.values.toList()
 
-    fun setLong(key: String, value: Long) {
-        values[key] = value.toString()
-    }
-
-    fun getLong(key: String, defaultValue: Long = 0L): Long {
-        return values[key]?.toLongOrNull() ?: defaultValue
-    }
-
-    fun asMap(): Map<String, String> = values.toMap()
-}
-
-data class ZoteroItem(
-    val id: String,
-    val title: String,
-    val collectionName: String = "Unfiled",
-    val year: Int? = null,
-)
-
-data class AttachmentMetadata(
-    val id: String,
-    val mimeType: String,
-    val title: String,
-    val sourcePath: String? = null,
-)
-
-data class StorageTarget(
-    val providerId: String,
-    val scheme: String,
-    val directoryPath: String,
-    val fileName: String,
-    val relativePath: String? = null,
-) {
-    val fullPath: String
-        get() = if (directoryPath.endsWith("/")) {
-            directoryPath + fileName
-        } else {
-            "$directoryPath/$fileName"
-        }
-}
-
-interface ZoteroPlugin {
-    val id: String
-    val name: String
-    val version: String
-    val type: PluginType
-    val description: String
-
-    fun initialize(context: Context)
-    fun shutdown()
-}
-
-interface AttachmentStoragePlugin : ZoteroPlugin {
-    fun supports(item: ZoteroItem, attachment: AttachmentMetadata): Boolean
-
-    fun resolveDestination(
+    fun resolveAttachmentStoragePlugin(
         item: ZoteroItem,
         attachment: AttachmentMetadata,
-        settings: PluginSettings,
-    ): StorageTarget
+    ): AttachmentStoragePlugin? {
+        return attachmentStoragePlugins.values.firstOrNull {
+            it.supports(item, attachment)
+        }
+    }
 
-    fun moveToTarget(
-        sourceFile: File,
-        target: StorageTarget,
-    ): Result<StorageTarget>
+    fun resolvePreferredAttachmentFile(
+        item: ZoteroItem,
+        attachment: AttachmentMetadata,
+        defaultFile: File,
+    ): File {
+        val plugin = resolveAttachmentStoragePlugin(item, attachment)
+            ?: return defaultFile
 
-    fun restore(target: StorageTarget): Result<File>
+        val settings = PluginSettings().apply {
+            setString(
+                "baseDirectory",
+                defaultFile.parentFile?.absolutePath ?: defaultFile.absolutePath,
+            )
+        }
+
+        val target = plugin.resolveDestination(item, attachment, settings)
+        val targetDirectory = File(target.directoryPath)
+        targetDirectory.mkdirs()
+
+        return File(target.fullPath)
+    }
+
+    @VisibleForTesting
+    fun isRegistered(pluginId: String): Boolean = attachmentStoragePlugins.containsKey(pluginId)
 }

@@ -17,6 +17,7 @@ import org.zotero.android.api.module.ZoteroNoRedirectModule
 import org.zotero.android.architecture.coroutines.ApplicationScope
 import org.zotero.android.architecture.coroutines.Dispatchers
 import org.zotero.android.architecture.coroutines.QDispatchers
+import org.zotero.android.plugins.PluginManager
 import javax.inject.Singleton
 
 @InstallIn(SingletonComponent::class)
@@ -41,6 +42,10 @@ internal class AppModule {
 
     @Provides
     fun provideContext(app: Application): Context = app
+
+    @Provides
+    @Singleton
+    fun providePluginManager(context: Context): PluginManager = PluginManager(context)
 
     @Provides
     @Singleton
